@@ -224,6 +224,88 @@ function getSeoMarkup(
   return { title, description, markup: tags.join('') };
 }
 
+/**
+ * 浏览器端挂载 Utterances 评论框(评论内容存储在 GitHub Issues 中)。
+ * - 首页不挂载评论。
+ * - Notion 是 SPA,依赖轮询 location.pathname 检测软导航并重新挂载。
+ * - 挂载点优先选 .notion-page-content 之后,找不到则退避重试,
+ *   多次重试后兜底追加到 body 末尾。
+ * - 主题跟随 Notion 自身的暗色模式 class,否则回退到系统色彩方案。
+ */
+const commentsMount = (repo: string) => {
+  const CONTAINER_ID = 'ncd-comments';
+  let lastPathname = '';
+  let mountAttempts = 0;
+
+  const isDarkMode = () =>
+    document.documentElement.classList.contains('dark-mode') ||
+    document.body.classList.contains('dark') ||
+    window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  const removeExisting = () => {
+    document.getElementById(CONTAINER_ID)?.remove();
+  };
+
+  const mount = () => {
+    if (location.pathname === '/') {
+      removeExisting();
+      return;
+    }
+
+    const anchor = document.querySelector('.notion-page-content');
+    if (!anchor && mountAttempts < 20) {
+      mountAttempts += 1;
+      setTimeout(mount, 300);
+      return;
+    }
+
+    removeExisting();
+    mountAttempts = 0;
+
+    const container = document.createElement('div');
+    container.id = CONTAINER_ID;
+    container.style.maxWidth = '900px';
+    container.style.margin = '40px auto';
+    container.style.padding = '0 96px';
+
+    const script = document.createElement('script');
+    script.src = 'https://utteranc.es/client.js';
+    script.async = true;
+    script.crossOrigin = 'anonymous';
+    script.setAttribute('repo', repo);
+    script.setAttribute('issue-term', 'pathname');
+    script.setAttribute('theme', isDarkMode() ? 'github-dark' : 'github-light');
+    container.appendChild(script);
+
+    if (anchor?.parentElement) {
+      anchor.parentElement.insertBefore(container, anchor.nextSibling);
+    } else {
+      document.body.appendChild(container);
+    }
+  };
+
+  const checkNavigation = () => {
+    if (location.pathname !== lastPathname) {
+      lastPathname = location.pathname;
+      mountAttempts = 0;
+      mount();
+    }
+  };
+
+  window
+    .matchMedia('(prefers-color-scheme: dark)')
+    .addEventListener('change', () => mount());
+  setInterval(checkNavigation, 500);
+  checkNavigation();
+};
+
+function getCommentsScript() {
+  const js = minifyExpression(
+    `(${commentsMount.toString()})(${JSON.stringify(config.comments.repo)})`,
+  );
+  return `<script>${js}</script>`;
+}
+
 const customScript = () => {
   const replacedUrl = (url: string) => {
     const [, domain] = /^https?:\/\/([^\\/]*)/.exec(url) || ['', ''];
@@ -358,9 +440,13 @@ function rewriteHtml(data: string, requestUrl: string, host?: string) {
 
   const headInjection = `${getVerificationMarkup()}${seoMarkup}${getInjectedHeadMarkup()}`;
 
+  // 评论仅在非首页内容页(文章 + 子页面)注入,getSeoKey 为空字符串代表首页。
+  const commentsInjection =
+    config.comments.enabled && getSeoKey(requestUrl) ? getCommentsScript() : '';
+
   return result
     .replace('</head>', `${headInjection}</head>`)
-    .replace('</body>', `${analyticsMarkup}</body>`);
+    .replace('</body>', `${analyticsMarkup}${commentsInjection}</body>`);
 }
 
 function rewriteSharedResponseContent(data: string) {

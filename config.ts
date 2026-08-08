@@ -70,6 +70,14 @@ export interface AppConfig {
     vercelSpeedInsights: boolean;
   };
 
+  /** ---------------- 评论 ---------------- */
+  comments: {
+    /** 是否启用 Utterances 评论(评论内容实际存储在下方 GitHub 仓库的 Issues 中) */
+    enabled: boolean;
+    /** 评论存放的 GitHub 仓库,格式为 "owner/repo" */
+    repo: string;
+  };
+
   /**
    * ---------------- 缓存刷新 ----------------
    * SEO / Slug 数据的内存缓存刷新间隔(毫秒)。
@@ -112,6 +120,11 @@ export const config: AppConfig = {
     googleAnalyticsId: '',
     vercelAnalytics: true,
     vercelSpeedInsights: false,
+  },
+
+  comments: {
+    enabled: true,
+    repo: 'PhysicalMouse/NotionBlogComment',
   },
 
   // 1 小时 = 60 * 60 * 1000 毫秒
