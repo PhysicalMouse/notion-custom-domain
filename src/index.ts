@@ -49,7 +49,11 @@ declare global {
     };
   }
 }
-const locationProxy = (pageDomain: string, pageId: string) => {
+const locationProxy = (
+  pageDomain: string,
+  pageId: string,
+  pageSlugMap: Record<string, string>,
+) => {
   window.ncd = {
     _pageId: pageId,
     _pageDomain: pageDomain,
@@ -59,12 +63,18 @@ const locationProxy = (pageDomain: string, pageId: string) => {
         .replace(/\/(?=\?|$)/, `/${this._pageId}`);
     },
     _yourUrl: function (url: string) {
-      return url
+      if (typeof url !== 'string') return url;
+      const rewritten = url
         .replace(this._pageDomain, location.origin)
         .replace(
           new RegExp(`(^|[^/])\\/[^/].*${this._pageId}(?=\\?|$)`),
           '$1/',
         );
+      const id = rewritten.replace(/-/g, '').match(/[0-9a-f]{32}(?=[/?#]|$)/i)?.[0]?.toLowerCase();
+      const slug = id ? pageSlugMap[id] : undefined;
+      if (!slug) return rewritten;
+      const parsed = new URL(rewritten, location.origin);
+      return `/${encodeURIComponent(slug)}${parsed.search}${parsed.hash}`;
     },
     href: function () {
       return this._myUrl(location.href);
@@ -91,7 +101,7 @@ function minifyExpression(expression: string) {
 
 function getLocationProxyScript() {
   return minifyExpression(
-    `(${locationProxy.toString()})('${pageDomain}', '${pageId}')`,
+    `(${locationProxy.toString()})(${JSON.stringify(pageDomain)}, ${JSON.stringify(pageId)}, ${JSON.stringify(seoStore.getPageSlugMap())})`,
   );
 }
 
@@ -177,10 +187,11 @@ function getSeoMarkup(
 
   const tags: string[] = [];
 
-  // 若页面设置了自定义 Slug,则输出指向简洁 URL 的 canonical / og:url
+  // 有 Slug 时只收录 Slug；没有 Slug 时收录 Notion 原始字符路径。
   const canonicalSlug = key ? seoStore.canonicalSlug(key) : undefined;
-  if (canonicalSlug && host) {
-    const canonicalUrl = `https://${host}/${encodeURIComponent(canonicalSlug)}`;
+  const canonicalPath = canonicalSlug ?? (meta ? key : undefined);
+  if (canonicalPath && host) {
+    const canonicalUrl = `https://${host}/${encodeURIComponent(canonicalPath)}`;
     tags.push(`<link rel="canonical" href="${escapeHtml(canonicalUrl)}">`);
     tags.push(`<meta property="og:url" content="${escapeHtml(canonicalUrl)}">`);
   }
@@ -257,7 +268,9 @@ function getCustomStyle() {
   return `<style>${css}</style>`;
 }
 
-const injectedHeadMarkup = `<script>${getLocationProxyScript()}</script>${getCustomScript()}${getCustomStyle()}`;
+function getInjectedHeadMarkup() {
+  return `<script>${getLocationProxyScript()}</script>${getCustomScript()}${getCustomStyle()}`;
+}
 
 function getProxyPath(url: string) {
   // 自定义 slug ��由:把 /my-slug 映射到对应 Notion 页面 ID
@@ -319,7 +332,11 @@ function rewriteHtml(data: string, requestUrl: string, host?: string) {
       : result.replace('</head>', `<title>${escapeHtml(title)}</title></head>`);
   }
 
-  // 移除 Notion 原有的 description,避免重复
+  // 移除 Notion 原有 SEO 标签，确保搜索引擎只读取本站生成的 canonical。
+  result = result
+    .replace(/<link[^>]*rel=["']canonical["'][^>]*>/gi, '')
+    .replace(/<meta[^>]*(?:property|name)=["']og:(?:url|title|description)["'][^>]*>/gi, '')
+    .replace(/<meta[^>]*name=["']twitter:(?:title|description)["'][^>]*>/gi, '');
   if (description) {
     result = result.replace(
       /<meta[^>]*name=["']description["'][^>]*>/gi,
@@ -327,7 +344,7 @@ function rewriteHtml(data: string, requestUrl: string, host?: string) {
     );
   }
 
-  const headInjection = `${getVerificationMarkup()}${seoMarkup}${injectedHeadMarkup}`;
+  const headInjection = `${getVerificationMarkup()}${seoMarkup}${getInjectedHeadMarkup()}`;
 
   return result
     .replace('</head>', `${headInjection}</head>`)

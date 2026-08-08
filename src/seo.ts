@@ -110,6 +110,13 @@ class SeoStore {
       : undefined;
   }
 
+  /** 页面 ID -> 自定义 slug，供浏览器端改写 Notion 内部导航 URL。 */
+  getPageSlugMap(): Record<string, string> {
+    const result: Record<string, string> = {};
+    for (const [slug, pageId] of this.slugToPageId) result[pageId] = slug;
+    return result;
+  }
+
   get updatedAt(): number {
     return this.lastRefreshedAt;
   }
@@ -277,7 +284,7 @@ class SeoStore {
           nextByPageId.set(meta.pageId, meta);
           nextBySlug.set(meta.slug, meta);
 
-          // 仅当存在自定义 slug 且与 pageId 不同时,才建立美观 URL 路由
+          // 仅当存���自定义 slug 且与 pageId 不同时,才建立美观 URL 路由
           if (hasCustomSlug && meta.slug !== meta.pageId) {
             nextSlugToPageId.set(meta.slug, meta.pageId);
           }
