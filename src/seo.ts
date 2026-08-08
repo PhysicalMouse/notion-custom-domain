@@ -1,3 +1,5 @@
+/* Notion API 的 property/block 联合类型随数据库配置动态变化。 */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { config } from '../config.js';
 
 /** 单条页面的 SEO 元数据 */
@@ -80,8 +82,8 @@ class SeoStore {
   private byPageId = new Map<string, PageMeta>();
   private bySlug = new Map<string, PageMeta>();
   private slugToPageId = new Map<string, string>();
-  private timer: NodeJS.Timeout | null = null;
   private lastRefreshedAt = 0;
+  private refreshPromise?: Promise<void>;
 
   /**
    * 根据请求路径的第一段查询 SEO 元数据。
@@ -304,16 +306,27 @@ class SeoStore {
     );
   }
 
-  /** 启动:立即刷新一次,并按配置的间隔定时刷新 */
+  /**
+   * 确保缓存可用。
+   * 冷启动或缓存过期时只发起一次刷新，所有并发请求共享同一个 Promise。
+   * Vercel Serverless 不保证 setInterval 持续运行，因此改为请求驱动刷新。
+   */
+  async ensureFresh(): Promise<void> {
+    const isEmpty = this.byPageId.size === 0;
+    const isExpired = Date.now() - this.lastRefreshedAt >= config.refreshIntervalMs;
+    if (!isEmpty && !isExpired) return;
+
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.refresh().finally(() => {
+        this.refreshPromise = undefined;
+      });
+    }
+    await this.refreshPromise;
+  }
+
+  /** 进程启动时预热；首个页面请求仍会通过 ensureFresh 等待结果。 */
   start(): void {
-    if (this.timer) return;
-    // 首次加载(失败不阻塞服务)
-    void this.refresh();
-    this.timer = setInterval(() => {
-      void this.refresh();
-    }, config.refreshIntervalMs);
-    // 定时器不应阻止进程退出
-    this.timer.unref?.();
+    void this.ensureFresh();
   }
 }
 

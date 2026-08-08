@@ -1,9 +1,6 @@
 {
   "version": 2,
   "builds": [{ "src": "src/index.ts", "use": "@vercel/node" }],
-  "redirects": [
-    { "source": "/[^/.]{1,8}", "destination": "/", "permanent": false }
-  ],
   "rewrites": [
     { "source": "/((?!_vercel/).*)", "destination": "/src/index.ts" }
   ]

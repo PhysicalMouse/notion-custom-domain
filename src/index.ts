@@ -5,7 +5,7 @@ import path from 'path';
 import { minify_sync as minify } from 'terser';
 import CleanCSS from 'clean-css';
 import { config } from '../config.js';
-import { seoStore, extractNotionId } from './seo.js';
+import { seoStore } from './seo.js';
 
 const PAGE_URL = config.pageUrl;
 const GA_MEASUREMENT_ID =
@@ -387,9 +387,16 @@ seoStore.start();
 // 将带前缀 / 原始 ID 的页面 URL 301 重定向到简洁 slug。
 // 仅处理浏览器 / 爬虫的顶层文档导航(Accept: text/html),
 // 不影响 Notion 前端的资源与 API 请求。
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   const accept = String(req.headers['accept'] ?? '');
   if (req.method !== 'GET' || !accept.includes('text/html')) return next();
+
+  try {
+    await seoStore.ensureFresh();
+  } catch (error) {
+    console.error('[NCD][SEO] 请求前刷新失败', (error as Error).message);
+    // Notion 页面仍应可用；刷新失败时继续代理原始字符 URL。
+  }
 
   const path = req.url.split('?')[0];
   const [, firstSegment = ''] = path.split('/');
@@ -459,7 +466,7 @@ app.use(
       const contentType = proxyRes.headers['content-type'] ?? '';
       if (
         PASSTHROUGH_REQUEST_PATTERN.test(userReq.url) ||
-        !contentType.startsWith('text/') && !contentType.includes('javascript')
+        (!contentType.startsWith('text/') && !contentType.includes('javascript'))
       ) {
         if (
           STATIC_ASSET_PATTERN.test(userReq.url) &&
