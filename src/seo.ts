@@ -12,6 +12,8 @@ export interface PageMeta {
   description: string;
   /** 用于 URL 的 slug(精简) */
   slug: string;
+  /** Notion 原始字符路径，用于没有 Slug 属性时的 SEO 收录 */
+  originalPath: string;
 }
 
 const NOTION_API = 'https://api.notion.com/v1';
@@ -119,6 +121,15 @@ class SeoStore {
     return result;
   }
 
+  /** 网站地图使用：有 Slug 时仅返回 Slug，否则返回 Notion 原始字符路径。 */
+  getSitemapPaths(): string[] {
+    return [...this.byPageId.values()].map((meta) =>
+      this.slugToPageId.get(meta.slug) === meta.pageId
+        ? meta.slug
+        : meta.originalPath,
+    );
+  }
+
   get updatedAt(): number {
     return this.lastRefreshedAt;
   }
@@ -128,7 +139,9 @@ class SeoStore {
     const results: any[] = [];
     let cursor: string | undefined;
     do {
-      const query = cursor ? `?start_cursor=${cursor}&page_size=100` : '?page_size=100';
+      const query = cursor
+        ? `?start_cursor=${cursor}&page_size=100`
+        : '?page_size=100';
       const json = await notionFetch(`/blocks/${blockId}/children${query}`);
       results.push(...(json.results ?? []));
       cursor = json.has_more ? json.next_cursor : undefined;
@@ -224,13 +237,23 @@ class SeoStore {
     const slugText = readPlainText(props[slug]);
 
     // 有 Slug 属性则用它(精简);否则回退到精简的 pageId
-    const resolvedSlug = slugText ? extractNotionId(slugText) || slugText : pageId;
+    const resolvedSlug = slugText
+      ? extractNotionId(slugText) || slugText
+      : pageId;
+
+    const originalPath =
+      String(record.url ?? '')
+        .split(/[?#]/)[0]
+        .split('/')
+        .filter(Boolean)
+        .pop() ?? pageId;
 
     return {
       pageId,
       title: titleText,
       description: descriptionText,
       slug: resolvedSlug,
+      originalPath,
     };
   }
 
@@ -313,7 +336,8 @@ class SeoStore {
    */
   async ensureFresh(): Promise<void> {
     const isEmpty = this.byPageId.size === 0;
-    const isExpired = Date.now() - this.lastRefreshedAt >= config.refreshIntervalMs;
+    const isExpired =
+      Date.now() - this.lastRefreshedAt >= config.refreshIntervalMs;
     if (!isEmpty && !isExpired) return;
 
     if (!this.refreshPromise) {

@@ -70,7 +70,10 @@ const locationProxy = (
           new RegExp(`(^|[^/])\\/[^/].*${this._pageId}(?=\\?|$)`),
           '$1/',
         );
-      const id = rewritten.replace(/-/g, '').match(/[0-9a-f]{32}(?=[/?#]|$)/i)?.[0]?.toLowerCase();
+      const id = rewritten
+        .replace(/-/g, '')
+        .match(/[0-9a-f]{32}(?=[/?#]|$)/i)?.[0]
+        ?.toLowerCase();
       const slug = id ? pageSlugMap[id] : undefined;
       if (!slug) return rewritten;
       const parsed = new URL(rewritten, location.origin);
@@ -276,7 +279,9 @@ function getProxyPath(url: string) {
   // 自定义 slug ��由:把 /my-slug 映射到对应 Notion 页面 ID
   const [, firstSegment = ''] = url.split('?')[0].split('/');
   if (firstSegment) {
-    const targetPageId = seoStore.resolvePageId(decodeURIComponent(firstSegment));
+    const targetPageId = seoStore.resolvePageId(
+      decodeURIComponent(firstSegment),
+    );
     if (targetPageId) {
       return `/${targetPageId}`;
     }
@@ -319,29 +324,36 @@ function rewriteRuntimeAsset(data: string) {
 }
 
 function rewriteHtml(data: string, requestUrl: string, host?: string) {
-  const { title, description, markup: seoMarkup } = getSeoMarkup(
-    requestUrl,
-    host,
-  );
+  const {
+    title,
+    description,
+    markup: seoMarkup,
+  } = getSeoMarkup(requestUrl, host);
   let result = data;
 
   // 替换原有 <title>(有自定义标题时)
   if (title) {
     result = /<title>[\s\S]*?<\/title>/i.test(result)
-      ? result.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(title)}</title>`)
+      ? result.replace(
+          /<title>[\s\S]*?<\/title>/i,
+          `<title>${escapeHtml(title)}</title>`,
+        )
       : result.replace('</head>', `<title>${escapeHtml(title)}</title></head>`);
   }
 
   // 移除 Notion 原有 SEO 标签，确保搜索引擎只读取本站生成的 canonical。
   result = result
     .replace(/<link[^>]*rel=["']canonical["'][^>]*>/gi, '')
-    .replace(/<meta[^>]*(?:property|name)=["']og:(?:url|title|description)["'][^>]*>/gi, '')
-    .replace(/<meta[^>]*name=["']twitter:(?:title|description)["'][^>]*>/gi, '');
-  if (description) {
-    result = result.replace(
-      /<meta[^>]*name=["']description["'][^>]*>/gi,
+    .replace(
+      /<meta[^>]*(?:property|name)=["']og:(?:url|title|description)["'][^>]*>/gi,
+      '',
+    )
+    .replace(
+      /<meta[^>]*name=["']twitter:(?:title|description)["'][^>]*>/gi,
       '',
     );
+  if (description) {
+    result = result.replace(/<meta[^>]*name=["']description["'][^>]*>/gi, '');
   }
 
   const headInjection = `${getVerificationMarkup()}${seoMarkup}${getInjectedHeadMarkup()}`;
@@ -383,6 +395,40 @@ const app = express();
 
 // 启动 SEO / Slug 内存缓存,并按 config.refreshIntervalMs 定时刷新
 seoStore.start();
+
+app.get('/robots.txt', (req, res) => {
+  res
+    .status(200)
+    .type('text/plain')
+    .send(
+      `User-agent: *\nAllow: /\nSitemap: https://${req.headers.host}/sitemap.xml\n`,
+    );
+});
+
+app.get('/sitemap.xml', async (req, res) => {
+  try {
+    await seoStore.ensureFresh();
+  } catch (error) {
+    console.error('[NCD][SEO] 网站地图刷新失败', (error as Error).message);
+  }
+
+  const origin = `https://${req.headers.host}`;
+  const paths = ['', ...seoStore.getSitemapPaths()];
+  const urls = [...new Set(paths)].map((pagePath) => {
+    const location = pagePath
+      ? `${origin}/${encodeURIComponent(pagePath)}`
+      : `${origin}/`;
+    return `<url><loc>${escapeHtml(location)}</loc></url>`;
+  });
+
+  res
+    .status(200)
+    .type('application/xml')
+    .set('Cache-Control', 'public, max-age=0, s-maxage=3600')
+    .send(
+      `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}</urlset>`,
+    );
+});
 
 // 将带前缀 / 原始 ID 的页面 URL 301 重定向到简洁 slug。
 // 仅处理浏览器 / 爬虫的顶层文档导航(Accept: text/html),
@@ -466,7 +512,8 @@ app.use(
       const contentType = proxyRes.headers['content-type'] ?? '';
       if (
         PASSTHROUGH_REQUEST_PATTERN.test(userReq.url) ||
-        (!contentType.startsWith('text/') && !contentType.includes('javascript'))
+        (!contentType.startsWith('text/') &&
+          !contentType.includes('javascript'))
       ) {
         if (
           STATIC_ASSET_PATTERN.test(userReq.url) &&
