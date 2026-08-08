@@ -8,7 +8,10 @@ import { config } from '../config.js';
 import { seoStore, extractNotionId } from './seo.js';
 
 const PAGE_URL = config.pageUrl;
-const GA_MEASUREMENT_ID = config.analytics.googleAnalyticsId;
+const GA_MEASUREMENT_ID =
+  config.analytics.googleAnalytics && config.analytics.googleAnalyticsId
+    ? config.analytics.googleAnalyticsId
+    : '';
 
 const GOOGLE_ANALYTICS_SOURCES =
   'https://www.googletagmanager.com https://www.google-analytics.com';
@@ -130,17 +133,17 @@ function escapeHtml(value: string): string {
 /** 站点验证 meta 标签(全站统一) */
 function getVerificationMarkup(): string {
   const tags: string[] = [];
-  if (config.verification.google) {
+  if (config.verification.google && config.verification.googleCode) {
     tags.push(
       `<meta name="google-site-verification" content="${escapeHtml(
-        config.verification.google,
+        config.verification.googleCode,
       )}">`,
     );
   }
-  if (config.verification.bing) {
+  if (config.verification.bing && config.verification.bingCode) {
     tags.push(
       `<meta name="msvalidate.01" content="${escapeHtml(
-        config.verification.bing,
+        config.verification.bingCode,
       )}">`,
     );
   }

@@ -3,8 +3,9 @@
  *  统一设置文件(项目根目录)
  * ------------------------------------------------------------
  *  所有可调整的配置项都集中在这里。
- *  敏感信息(如 Notion Token)通过环境变量读取,其余配置直接在
- *  下方修改即可,无需改动其它代码文件。
+ *  - 开关类用 true / false 控制启用与关闭。
+ *  - 需要填写的验证码 / ID 类,不使用时留空字符串 '' 即可。
+ *  敏感信息(如 Notion Token)通过环境变量读取。
  * ============================================================
  */
 
@@ -20,11 +21,8 @@ export interface AppConfig {
     version: string;
     /**
      * 数据库会从根页面自动检测,无需手动填写。
-     * 程序会读取 pageUrl 对应页面里的所有子数据库,再读取每个
-     * 数据库中的页面条目。
-     *
      * 如需强制指定额外数据库(例如链接式数据库无法自动发现),
-     * 可以把数据库 ID 填在这里作为补充。
+     * 把数据库 ID 填在这里作为补充,不需要则留空数组。
      */
     extraDatabaseIds: string[];
     /** 数据库中用于生成 SEO / Slug 的属性名称(区分大小写) */
@@ -42,23 +40,29 @@ export interface AppConfig {
   seo: {
     /** 根页面默认标题;留空则使用 Notion 原始标题 */
     defaultTitle: string;
-    /** 根页面默认描述 */
+    /** 根页面默认描述;留空则不输出 */
     defaultDescription: string;
-    /** 站点名称(用于 og:site_name) */
+    /** 站点名称(用于 og:site_name);留空则不输出 */
     siteName: string;
   };
 
   /** ---------------- 站点验证 ---------------- */
   verification: {
-    /** Google Search Console 验证码(google-site-verification 的 content 值) */
-    google: string;
-    /** Bing Webmaster 验证码(msvalidate.01 的 content 值) */
-    bing: string;
+    /** 是否启用 Google Search Console 验证 */
+    google: boolean;
+    /** Google 验证码(google-site-verification 的 content 值),google 为 false 时可留空 */
+    googleCode: string;
+    /** 是否启用 Bing Webmaster 验证 */
+    bing: boolean;
+    /** Bing 验证码(msvalidate.01 的 content 值),bing 为 false 时可留空 */
+    bingCode: string;
   };
 
   /** ---------------- 分析统计 ---------------- */
   analytics: {
-    /** Google Analytics 4 衡量 ID,例如 G-XXXXXXXXXX;默认读取环境变量 GA_MEASUREMENT_ID */
+    /** 是否启用 Google Analytics */
+    googleAnalytics: boolean;
+    /** Google Analytics 4 衡量 ID,例如 G-XXXXXXXXXX;googleAnalytics 为 false 时可留空 */
     googleAnalyticsId: string;
     /** 是否启用 Vercel Analytics */
     vercelAnalytics: boolean;
@@ -82,9 +86,7 @@ export const config: AppConfig = {
   notion: {
     token: process.env.NOTION_TOKEN ?? '',
     version: '2022-06-28',
-    extraDatabaseIds: [
-      // '可选:在此补充无法自动发现的数据库 ID',
-    ],
+    extraDatabaseIds: [],
     propertyNames: {
       title: 'Name',
       description: 'Description',
@@ -99,12 +101,15 @@ export const config: AppConfig = {
   },
 
   verification: {
-    google: '',
-    bing: '',
+    google: false,
+    googleCode: '',
+    bing: false,
+    bingCode: '',
   },
 
   analytics: {
-    googleAnalyticsId: process.env.GA_MEASUREMENT_ID ?? '',
+    googleAnalytics: false,
+    googleAnalyticsId: '',
     vercelAnalytics: true,
     vercelSpeedInsights: true,
   },
