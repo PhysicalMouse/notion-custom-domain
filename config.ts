@@ -115,5 +115,5 @@ export const config: AppConfig = {
   },
 
   // 1 小时 = 60 * 60 * 1000 毫秒
-  refreshIntervalMs: 60 * 60 * 1000,
+  refreshIntervalMs: 24 * 60 * 60 * 1000,
 };
