@@ -161,7 +161,10 @@ function getSeoKey(requestUrl: string): string {
  * - 优先使用数据库条目的 Description / 标题
  * - 根页面回退到设置文件中的默认值
  */
-function getSeoMarkup(requestUrl: string): {
+function getSeoMarkup(
+  requestUrl: string,
+  host?: string,
+): {
   title: string;
   description: string;
   markup: string;
@@ -173,6 +176,14 @@ function getSeoMarkup(requestUrl: string): {
   const description = meta?.description || config.seo.defaultDescription;
 
   const tags: string[] = [];
+
+  // 若页面设置了自定义 Slug,则输出指向简洁 URL 的 canonical / og:url
+  const canonicalSlug = key ? seoStore.canonicalSlug(key) : undefined;
+  if (canonicalSlug && host) {
+    const canonicalUrl = `https://${host}/${encodeURIComponent(canonicalSlug)}`;
+    tags.push(`<link rel="canonical" href="${escapeHtml(canonicalUrl)}">`);
+    tags.push(`<meta property="og:url" content="${escapeHtml(canonicalUrl)}">`);
+  }
   if (description) {
     tags.push(`<meta name="description" content="${escapeHtml(description)}">`);
     tags.push(
@@ -294,8 +305,11 @@ function rewriteRuntimeAsset(data: string) {
   return data.replace(LOCATION_HREF_PATTERN, 'window.ncd.href()');
 }
 
-function rewriteHtml(data: string, requestUrl: string) {
-  const { title, description, markup: seoMarkup } = getSeoMarkup(requestUrl);
+function rewriteHtml(data: string, requestUrl: string, host?: string) {
+  const { title, description, markup: seoMarkup } = getSeoMarkup(
+    requestUrl,
+    host,
+  );
   let result = data;
 
   // 替换原有 <title>(有自定义标题时)
@@ -329,10 +343,14 @@ function rewriteSharedResponseContent(data: string) {
     .replace(/\w+\.init\({dsn:/, 'return;$&');
 }
 
-function decorateHtmlOrAssetResponse(data: string, requestUrl: string) {
+function decorateHtmlOrAssetResponse(
+  data: string,
+  requestUrl: string,
+  host?: string,
+) {
   const rewritten = ASSET_REQUEST_PATTERN.test(requestUrl)
     ? rewriteRuntimeAsset(data)
-    : rewriteHtml(data, requestUrl);
+    : rewriteHtml(data, requestUrl, host);
 
   return rewriteSharedResponseContent(rewritten);
 }
@@ -348,6 +366,31 @@ const app = express();
 
 // 启动 SEO / Slug 内存缓存,并按 config.refreshIntervalMs 定时刷新
 seoStore.start();
+
+// 将带前缀 / 原始 ID 的页面 URL 301 重定向到简洁 slug。
+// 仅处理浏览器 / 爬虫的顶层文档导航(Accept: text/html),
+// 不影响 Notion 前端的资源与 API 请求。
+app.use((req, res, next) => {
+  const accept = String(req.headers['accept'] ?? '');
+  if (req.method !== 'GET' || !accept.includes('text/html')) return next();
+
+  const path = req.url.split('?')[0];
+  const [, firstSegment = ''] = path.split('/');
+  // 根页面、带扩展名的资源、特殊端点不重定向
+  if (!firstSegment || firstSegment.includes('.')) return next();
+  if (/^(200|_assets|_next|image|images|api)$/i.test(firstSegment)) {
+    return next();
+  }
+
+  const decoded = decodeURIComponent(firstSegment);
+  const slug = seoStore.canonicalSlug(decoded);
+  if (slug && slug !== decoded) {
+    const query = req.url.slice(path.length); // 保留 query string
+    res.redirect(301, `/${encodeURIComponent(slug)}${query}`);
+    return;
+  }
+  next();
+});
 
 app.use((req, res, next) => {
   const cached = assetCache.get(req.url);
@@ -411,7 +454,11 @@ app.use(
       }
 
       const data = proxyResData.toString();
-      const result = decorateHtmlOrAssetResponse(data, userReq.url);
+      const result = decorateHtmlOrAssetResponse(
+        data,
+        userReq.url,
+        userReq.headers.host,
+      );
 
       if (
         STATIC_ASSET_PATTERN.test(userReq.url) &&

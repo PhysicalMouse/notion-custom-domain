@@ -97,6 +97,19 @@ class SeoStore {
     return this.slugToPageId.get(slug);
   }
 
+  /**
+   * 返回某请求键(slug 或 Notion 页面路径)对应页面的「自定义 slug」。
+   * 仅当该页面确实设置了 Slug 属性时才返回;否则返回 undefined
+   * (此时应保留 Notion 原始 URL,符合「没有 Slug 就用原页面字符」的规则)。
+   */
+  canonicalSlug(key: string): string | undefined {
+    const meta = this.getMeta(key);
+    if (!meta) return undefined;
+    return this.slugToPageId.get(meta.slug) === meta.pageId
+      ? meta.slug
+      : undefined;
+  }
+
   get updatedAt(): number {
     return this.lastRefreshedAt;
   }
@@ -115,10 +128,41 @@ class SeoStore {
   }
 
   /**
+   * 通过 Notion Search API 检测所有对集成可见的数据库。
+   * 相比只爬根页面的 child_database 块,这种方式能可靠地发现:
+   *   - 链接式数据库视图(linked database)
+   *   - 嵌套很深或位于分栏 / 折叠块内的数据库
+   * 这些正是「有些页面仍保留 Blender- 前缀、未命中 Slug」的原因。
+   */
+  private async searchDatabaseIds(): Promise<string[]> {
+    const found = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const body: Record<string, unknown> = {
+        filter: { property: 'object', value: 'database' },
+        page_size: 100,
+      };
+      if (cursor) body.start_cursor = cursor;
+      const json = await notionFetch('/search', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      for (const item of json.results ?? []) {
+        if (item.object === 'database' && item.id) {
+          found.add(stripDashes(item.id));
+        }
+      }
+      cursor = json.has_more ? json.next_cursor : undefined;
+    } while (cursor);
+    return [...found];
+  }
+
+  /**
    * 从根页面递归检测所有子数据库(child_database)。
    * 会进入列、分栏、折叠块等容器,最多递归 4 层。
+   * 作为 Search API 的补充,防止个别数据库未被搜索索引。
    */
-  private async discoverDatabaseIds(rootPageId: string): Promise<string[]> {
+  private async crawlDatabaseIds(rootPageId: string): Promise<string[]> {
     const found = new Set<string>();
 
     const visit = async (blockId: string, depth: number): Promise<void> => {
@@ -190,17 +234,23 @@ class SeoStore {
 
     const rootPageId = extractNotionId(config.pageUrl);
 
-    // 自动检测 + 手动补充的数据库
-    let databaseIds: string[] = [];
+    // 自动检测(Search API 为主 + 根页面爬取为辅)+ 手动补充
+    const ids = new Set<string>();
     try {
-      databaseIds = await this.discoverDatabaseIds(rootPageId);
+      for (const id of await this.searchDatabaseIds()) ids.add(id);
     } catch (error) {
-      console.error('[NCD][SEO] 数据库自动检测失败', (error as Error).message);
+      console.error('[NCD][SEO] Search API 检测失败', (error as Error).message);
+    }
+    try {
+      for (const id of await this.crawlDatabaseIds(rootPageId)) ids.add(id);
+    } catch (error) {
+      console.error('[NCD][SEO] 根页面爬取失败', (error as Error).message);
     }
     for (const id of config.notion.extraDatabaseIds) {
       const compact = stripDashes(id);
-      if (compact && !databaseIds.includes(compact)) databaseIds.push(compact);
+      if (compact) ids.add(compact);
     }
+    const databaseIds = [...ids];
 
     if (databaseIds.length === 0) {
       console.info('[NCD][SEO] 未发现任何数据库');
