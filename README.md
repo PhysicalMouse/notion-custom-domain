@@ -59,7 +59,7 @@ yarn debug
 页面内的属性(标题 / Description / Slug)需要通过 Notion 官方 API 读取,因此需要创建一个 [Notion 集成](https://www.notion.so/my-integrations) 并将其 Token 设置为环境变量(注意这是密钥,不要写进代码里):
 
 ```
-NOTION_TOKEN=secret_xxx
+NOTION_API_TOKEN=secret_xxx
 ```
 
 创建集成后,别忘了在 Notion 页面中把该集成添加为「连接」,否则 API 无权限读取数据。

@@ -15,7 +15,7 @@ export interface AppConfig {
 
   /** ---------------- Notion 官方 API ---------------- */
   notion: {
-    /** Notion 集成 Token，读取环境变量 NOTION_TOKEN */
+    /** Notion 集成 Token，读取环境变量 NOTION_API_TOKEN */
     token: string;
     /** Notion API 版本 */
     version: string;
@@ -92,7 +92,7 @@ export const config: AppConfig = {
     'https://physicalmouse.notion.site/264686b24bf08004a950c99ffcdfecc5',
 
   notion: {
-    token: process.env.NOTION_TOKEN ?? '',
+    token: process.env.NOTION_API_TOKEN ?? '',
     version: '2022-06-28',
     extraDatabaseIds: [],
     propertyNames: {
