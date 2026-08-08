@@ -16,6 +16,7 @@ const GA_MEASUREMENT_ID =
 const GOOGLE_ANALYTICS_SOURCES =
   'https://www.googletagmanager.com https://www.google-analytics.com';
 const VERCEL_ANALYTICS_SOURCES = 'https://va.vercel-scripts.com';
+const UTTERANCES_SOURCES = 'https://utteranc.es https://api.github.com';
 const CUSTOM_STYLE = `
   .notion-topbar > div > div:nth-last-child(1), .notion-topbar > div > div:nth-last-child(2) {
     display:none !important;
@@ -228,14 +229,16 @@ function getSeoMarkup(
  * 浏览器端挂载 Utterances 评论框(评论内容存储在 GitHub Issues 中)。
  * - 首页不挂载评论。
  * - Notion 是 SPA,依赖轮询 location.pathname 检测软导航并重新挂载。
- * - 挂载点优先选 .notion-page-content 之后,找不到则退避重试,
- *   多次重试后兜底追加到 body 末尾。
+ * - 容器直接挂在 #notion-app 之后、作为 body 的直接子节点,而不是插入
+ *   Notion 自己 React 树管理的 .notion-page-content 内部 —— 后者会在
+ *   Notion 客户端重新渲染时把我们插入的兄弟节点一并清空。
+ * - 每次轮询都会检查容器是否仍存在,如被移除会自动重新挂载。
  * - 主题跟随 Notion 自身的暗色模式 class,否则回退到系统色彩方案。
  */
 const commentsMount = (repo: string) => {
   const CONTAINER_ID = 'ncd-comments';
   let lastPathname = '';
-  let mountAttempts = 0;
+  let waitingForContent = false;
 
   const isDarkMode = () =>
     document.documentElement.classList.contains('dark-mode') ||
@@ -246,22 +249,7 @@ const commentsMount = (repo: string) => {
     document.getElementById(CONTAINER_ID)?.remove();
   };
 
-  const mount = () => {
-    if (location.pathname === '/') {
-      removeExisting();
-      return;
-    }
-
-    const anchor = document.querySelector('.notion-page-content');
-    if (!anchor && mountAttempts < 20) {
-      mountAttempts += 1;
-      setTimeout(mount, 300);
-      return;
-    }
-
-    removeExisting();
-    mountAttempts = 0;
-
+  const buildContainer = () => {
     const container = document.createElement('div');
     container.id = CONTAINER_ID;
     container.style.maxWidth = '900px';
@@ -276,27 +264,61 @@ const commentsMount = (repo: string) => {
     script.setAttribute('issue-term', 'pathname');
     script.setAttribute('theme', isDarkMode() ? 'github-dark' : 'github-light');
     container.appendChild(script);
+    return container;
+  };
 
-    if (anchor?.parentElement) {
-      anchor.parentElement.insertBefore(container, anchor.nextSibling);
+  const insertContainer = () => {
+    const container = buildContainer();
+    const notionApp = document.getElementById('notion-app');
+    if (notionApp?.parentElement) {
+      notionApp.parentElement.insertBefore(container, notionApp.nextSibling);
     } else {
       document.body.appendChild(container);
     }
   };
 
-  const checkNavigation = () => {
+  const mount = () => {
+    if (location.pathname === '/') {
+      removeExisting();
+      waitingForContent = false;
+      return;
+    }
+
+    if (document.getElementById(CONTAINER_ID)) {
+      return;
+    }
+
+    if (!document.querySelector('.notion-page-content')) {
+      waitingForContent = true;
+      return;
+    }
+
+    waitingForContent = false;
+    insertContainer();
+  };
+
+  const tick = () => {
     if (location.pathname !== lastPathname) {
       lastPathname = location.pathname;
-      mountAttempts = 0;
+      removeExisting();
+      waitingForContent = false;
+    }
+    if (
+      location.pathname !== '/' &&
+      (!document.getElementById(CONTAINER_ID) || waitingForContent)
+    ) {
       mount();
     }
   };
 
   window
     .matchMedia('(prefers-color-scheme: dark)')
-    .addEventListener('change', () => mount());
-  setInterval(checkNavigation, 500);
-  checkNavigation();
+    .addEventListener('change', () => {
+      removeExisting();
+      mount();
+    });
+  setInterval(tick, 500);
+  tick();
 };
 
 function getCommentsScript() {
@@ -381,9 +403,13 @@ function rewriteCookieDomains(cookies: string[], hostname: string) {
 }
 
 function addAnalyticsSourcesToCsp(csp: string) {
+  // Utterances 的 client.js 通过 script-src 加载,并用 connect-src 调用 GitHub API 拉取评论。
+  const commentsSources = config.comments.enabled
+    ? ` ${UTTERANCES_SOURCES}`
+    : '';
   return csp.replace(
     /(?=(script-src|connect-src) )[^;]*/g,
-    `$& ${GOOGLE_ANALYTICS_SOURCES} ${VERCEL_ANALYTICS_SOURCES}`,
+    `$& ${GOOGLE_ANALYTICS_SOURCES} ${VERCEL_ANALYTICS_SOURCES}${commentsSources}`,
   );
 }
 
