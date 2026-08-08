@@ -103,8 +103,8 @@ export const config: AppConfig = {
   verification: {
     google: false,
     googleCode: '',
-    bing: false,
-    bingCode: '',
+    bing: true,
+    bingCode: '96B332BE8C0729927B4C665A4E31D77A',
   },
 
   analytics: {
