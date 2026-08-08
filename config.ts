@@ -81,7 +81,7 @@ export interface AppConfig {
 export const config: AppConfig = {
   pageUrl:
     process.env.PAGE_URL ??
-    'https://notion.notion.site/Notion-Official-83715d7703ee4b8699b5e659a4712dd8',
+    'https://app.notion.com/p/physicalmouse/264686b24bf08004a950c99ffcdfecc5',
 
   notion: {
     token: process.env.NOTION_TOKEN ?? '',
