@@ -96,8 +96,25 @@ class SeoStore {
     return this.bySlug.get(key) ?? this.byPageId.get(extractNotionId(key));
   }
 
-  /** 根据自定义 slug 解析出目标 Notion 页面 ID */
+  /** 根据自定义 slug 解析出目标 Notion 页面 ID(仅查当前缓存,不刷新) */
   resolvePageId(slug: string): string | undefined {
+    return this.slugToPageId.get(slug);
+  }
+
+  /**
+   * 解析自定义 slug 对应的 Notion 页面 ID；缓存未命中时会立即强制刷新一次
+   * 并重试。用于应对"页面刚发布/改名,尚未等到下一次定时刷新"就被直接访问
+   * 的情况 —— 避免在下一次刷新窗口到来前,直接访问该 URL 时被误判为
+   * 未找到并原样转发给 Notion,出现 Notion 官方 404 页面。
+   */
+  async resolvePageIdFresh(slug: string): Promise<string | undefined> {
+    const cached = this.slugToPageId.get(slug);
+    if (cached) return cached;
+    try {
+      await this.forceRefresh();
+    } catch (error) {
+      console.error('[NCD][SEO] 按需强制刷新失败', (error as Error).message);
+    }
     return this.slugToPageId.get(slug);
   }
 
@@ -361,6 +378,16 @@ class SeoStore {
     );
   }
 
+  /** 无条件发起一次刷新；并发调用共享同一个 Promise,避免重复请求 Notion API。 */
+  private async forceRefresh(): Promise<void> {
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.refresh().finally(() => {
+        this.refreshPromise = undefined;
+      });
+    }
+    await this.refreshPromise;
+  }
+
   /**
    * 确保缓存可用。
    * 冷启动或缓存过期时只发起一次刷新，所有并发请求共享同一个 Promise。
@@ -371,13 +398,7 @@ class SeoStore {
     const isExpired =
       Date.now() - this.lastRefreshedAt >= config.refreshIntervalMs;
     if (!isEmpty && !isExpired) return;
-
-    if (!this.refreshPromise) {
-      this.refreshPromise = this.refresh().finally(() => {
-        this.refreshPromise = undefined;
-      });
-    }
-    await this.refreshPromise;
+    await this.forceRefresh();
   }
 
   /** 进程启动时预热；首个页面请求仍会通过 ensureFresh 等待结果。 */

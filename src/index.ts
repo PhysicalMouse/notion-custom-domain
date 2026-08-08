@@ -289,11 +289,14 @@ function getInjectedHeadMarkup() {
   return `<script>${getLocationProxyScript()}</script>${getCustomScript()}${getCustomStyle()}`;
 }
 
-function getProxyPath(url: string) {
-  // 自定义 slug ��由:把 /my-slug 映射到对应 Notion 页面 ID
+async function getProxyPath(url: string) {
+  // 自定义 slug 路由：把 /my-slug 映射到对应 Notion 页面 ID。
+  // 缓存未命中时会强制刷新一次并重试,避免"页面刚发布,还没到下一次定时
+  // 刷新窗口"时直接访问该 URL 被误判为未找到,原样转发给 Notion 导致
+  // 出现 Notion 官方的"找不到此页面"。
   const [, firstSegment = ''] = url.split('?')[0].split('/');
   if (firstSegment) {
-    const targetPageId = seoStore.resolvePageId(
+    const targetPageId = await seoStore.resolvePageIdFresh(
       decodeURIComponent(firstSegment),
     );
     if (targetPageId) {
