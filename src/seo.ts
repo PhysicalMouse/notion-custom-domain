@@ -127,12 +127,16 @@ class SeoStore {
     return result;
   }
 
-  /** 网站地图使用：有 Slug 时仅返回 Slug，否则返回 Notion 原始字符路径。 */
+  /**
+   * 网站地图使用：有自定义 Slug 时仅返回 Slug；否则返回精简的纯页面 ID
+   * (而非标题前缀的 Notion 原始字符路径),与站内实际链接
+   * (见 getPageSlugMap)保持一致,避免收录冗长的 URL。
+   */
   getSitemapPaths(): string[] {
     return [...this.byPageId.values()].map((meta) =>
       this.slugToPageId.get(meta.slug) === meta.pageId
         ? meta.slug
-        : meta.originalPath,
+        : meta.pageId,
     );
   }
 
