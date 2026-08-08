@@ -4,8 +4,8 @@ import { URL } from 'url';
 import path from 'path';
 import { minify_sync as minify } from 'terser';
 import CleanCSS from 'clean-css';
-import { config } from './config.js';
-import { seoStore } from './seo.js';
+import { config } from '../config.js';
+import { seoStore, extractNotionId } from './seo.js';
 
 const PAGE_URL = config.pageUrl;
 const GA_MEASUREMENT_ID = config.analytics.googleAnalyticsId;
@@ -246,7 +246,7 @@ function getCustomStyle() {
 const injectedHeadMarkup = `<script>${getLocationProxyScript()}</script>${getCustomScript()}${getCustomStyle()}`;
 
 function getProxyPath(url: string) {
-  // 自定义 slug 路由:把 /my-slug 映射到对应 Notion 页面 ID
+  // 自定义 slug ��由:把 /my-slug 映射到对应 Notion 页面 ID
   const [, firstSegment = ''] = url.split('?')[0].split('/');
   if (firstSegment) {
     const targetPageId = seoStore.resolvePageId(decodeURIComponent(firstSegment));

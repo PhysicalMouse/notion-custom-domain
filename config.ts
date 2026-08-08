@@ -1,6 +1,6 @@
 /**
  * ============================================================
- *  统一设置文件
+ *  统一设置文件(项目根目录)
  * ------------------------------------------------------------
  *  所有可调整的配置项都集中在这里。
  *  敏感信息(如 Notion Token)通过环境变量读取,其余配置直接在
@@ -14,16 +14,19 @@ export interface AppConfig {
 
   /** ---------------- Notion 官方 API ---------------- */
   notion: {
-    /** Notion 集成 Token(密钥),请在环境变量 NOTION_TOKEN 中设置 */
+    /** Notion 集成 Token(密钥),已在环境变量 NOTION_TOKEN 中设置 */
     token: string;
     /** Notion API 版本 */
     version: string;
     /**
-     * 页面中包含的数据库 ID 列表。
-     * 页面里可能有多个数据库,把每个数据库 ID 都填进来。
-     * 数据库 ID 是 Notion 数据库链接里的 32 位十六进制字符串。
+     * 数据库会从根页面自动检测,无需手动填写。
+     * 程序会读取 pageUrl 对应页面里的所有子数据库,再读取每个
+     * 数据库中的页面条目。
+     *
+     * 如需强制指定额外数据库(例如链接式数据库无法自动发现),
+     * 可以把数据库 ID 填在这里作为补充。
      */
-    databaseIds: string[];
+    extraDatabaseIds: string[];
     /** 数据库中用于生成 SEO / Slug 的属性名称(区分大小写) */
     propertyNames: {
       /** 标题属性(type = title) */
@@ -79,8 +82,8 @@ export const config: AppConfig = {
   notion: {
     token: process.env.NOTION_TOKEN ?? '',
     version: '2022-06-28',
-    databaseIds: [
-      // '在此填入数据库 ID',
+    extraDatabaseIds: [
+      // '可选:在此补充无法自动发现的数据库 ID',
     ],
     propertyNames: {
       title: 'Name',
