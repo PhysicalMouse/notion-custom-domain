@@ -143,6 +143,23 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
+// 搜索引擎(必应/谷歌)推荐的标题与描述长度区间。
+const TITLE_MAX = 60;
+const DESCRIPTION_MAX = 160;
+
+/**
+ * 把文本裁剪到指定长度上限,尽量在词边界断开并追加省略号。
+ * 已在长度内则原样返回。
+ */
+function truncateText(text: string, max: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  const sliced = trimmed.slice(0, max - 1);
+  const lastSpace = sliced.lastIndexOf(' ');
+  const base = lastSpace > max * 0.6 ? sliced.slice(0, lastSpace) : sliced;
+  return `${base.trimEnd()}…`;
+}
+
 /** 站点验证 meta 标签(全站统一) */
 function getVerificationMarkup(): string {
   const tags: string[] = [];
@@ -178,17 +195,39 @@ function getSeoMarkup(
   requestUrl: string,
   host?: string,
 ): {
+  /** 完整标题,用于注入页面的 <h1> */
   title: string;
+  /** 裁剪到搜索引擎推荐长度的标题,用于 <title> 与 og:title */
+  metaTitle: string;
   description: string;
   markup: string;
 } {
   const key = getSeoKey(requestUrl);
   const meta = key ? seoStore.getMeta(key) : undefined;
 
-  const title = meta?.title || config.seo.defaultTitle;
-  const description = meta?.description || config.seo.defaultDescription;
+  const title = (meta?.title || config.seo.defaultTitle).trim();
+  const metaTitle = title ? truncateText(title, TITLE_MAX) : '';
+
+  // 描述缺失时回退到标题,保证有内容,再统一裁剪到推荐长度上限。
+  const rawDescription = (
+    meta?.description ||
+    config.seo.defaultDescription ||
+    title
+  ).trim();
+  const description = rawDescription
+    ? truncateText(rawDescription, DESCRIPTION_MAX)
+    : '';
 
   const tags: string[] = [];
+
+  // 声明页面语言,供搜索引擎(必应 Meta Language 检查)识别。
+  if (config.seo.language) {
+    tags.push(
+      `<meta http-equiv="content-language" content="${escapeHtml(
+        config.seo.language,
+      )}">`,
+    );
+  }
 
   // 有 Slug 时只收录 Slug；没有 Slug 时收录 Notion 原始字符路径。
   const canonicalSlug = key ? seoStore.canonicalSlug(key) : undefined;
@@ -207,9 +246,9 @@ function getSeoMarkup(
       `<meta name="twitter:description" content="${escapeHtml(description)}">`,
     );
   }
-  if (title) {
-    tags.push(`<meta property="og:title" content="${escapeHtml(title)}">`);
-    tags.push(`<meta name="twitter:title" content="${escapeHtml(title)}">`);
+  if (metaTitle) {
+    tags.push(`<meta property="og:title" content="${escapeHtml(metaTitle)}">`);
+    tags.push(`<meta name="twitter:title" content="${escapeHtml(metaTitle)}">`);
   }
   if (config.seo.siteName) {
     tags.push(
@@ -221,7 +260,7 @@ function getSeoMarkup(
   tags.push('<meta property="og:type" content="website">');
   tags.push('<meta name="twitter:card" content="summary_large_image">');
 
-  return { title, description, markup: tags.join('') };
+  return { title, metaTitle, description, markup: tags.join('') };
 }
 
 const customScript = () => {
@@ -326,19 +365,31 @@ function rewriteRuntimeAsset(data: string) {
 function rewriteHtml(data: string, requestUrl: string, host?: string) {
   const {
     title,
+    metaTitle,
     description,
     markup: seoMarkup,
   } = getSeoMarkup(requestUrl, host);
   let result = data;
 
-  // 替换原有 <title>(有自定义标题时)
-  if (title) {
+  // 替换原有 <title>(有自定义标题时),使用裁剪到推荐长度的标题
+  if (metaTitle) {
     result = /<title>[\s\S]*?<\/title>/i.test(result)
       ? result.replace(
           /<title>[\s\S]*?<\/title>/i,
-          `<title>${escapeHtml(title)}</title>`,
+          `<title>${escapeHtml(metaTitle)}</title>`,
         )
-      : result.replace('</head>', `<title>${escapeHtml(title)}</title></head>`);
+      : result.replace(
+          '</head>',
+          `<title>${escapeHtml(metaTitle)}</title></head>`,
+        );
+  }
+
+  // 为 <html> 补充 lang 属性(缺失时),供搜索引擎识别页面语言。
+  if (config.seo.language && !/<html[^>]*\slang=/i.test(result)) {
+    result = result.replace(
+      /<html\b/i,
+      `<html lang="${escapeHtml(config.seo.language)}"`,
+    );
   }
 
   // 移除 Notion 原有 SEO 标签，确保搜索引擎只读取本站生成的 canonical。
@@ -358,9 +409,20 @@ function rewriteHtml(data: string, requestUrl: string, host?: string) {
 
   const headInjection = `${getVerificationMarkup()}${seoMarkup}${getInjectedHeadMarkup()}`;
 
-  return result
+  result = result
     .replace('</head>', `${headInjection}</head>`)
     .replace('</body>', `${analyticsMarkup}</body>`);
+
+  // 注入一个对搜索引擎可见、视觉上隐藏的 <h1>(Notion 正文由客户端渲染,
+  // 服务端首屏缺少 h1,必应会报「缺少 h1 标记」)。使用完整标题保留关键词。
+  if (title && /<body\b[^>]*>/i.test(result)) {
+    const hiddenH1 = `<h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">${escapeHtml(
+      title,
+    )}</h1>`;
+    result = result.replace(/(<body\b[^>]*>)/i, `$1${hiddenH1}`);
+  }
+
+  return result;
 }
 
 function rewriteSharedResponseContent(data: string) {

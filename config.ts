@@ -44,6 +44,11 @@ export interface AppConfig {
     defaultDescription: string;
     /** 站点名称(用于 og:site_name);留空则不输出 */
     siteName: string;
+    /**
+     * 页面主要语言,用于 <html lang> 与 content-language meta 标记
+     * (搜索引擎语言识别)。例如 'zh-CN'、'en'。
+     */
+    language: string;
   };
 
   /** ---------------- 站点验证 ---------------- */
@@ -98,6 +103,7 @@ export const config: AppConfig = {
     defaultTitle: '',
     defaultDescription: '',
     siteName: '',
+    language: 'zh-CN',
   },
 
   verification: {
