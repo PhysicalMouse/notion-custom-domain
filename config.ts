@@ -81,7 +81,7 @@ export interface AppConfig {
 export const config: AppConfig = {
   pageUrl:
     process.env.PAGE_URL ??
-    'https://app.notion.com/p/physicalmouse/264686b24bf08004a950c99ffcdfecc5',
+    'https://physicalmouse.notion.site/264686b24bf08004a950c99ffcdfecc5',
 
   notion: {
     token: process.env.NOTION_TOKEN ?? '',
@@ -111,7 +111,7 @@ export const config: AppConfig = {
     googleAnalytics: false,
     googleAnalyticsId: '',
     vercelAnalytics: true,
-    vercelSpeedInsights: true,
+    vercelSpeedInsights: false,
   },
 
   // 1 小时 = 60 * 60 * 1000 毫秒
