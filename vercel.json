@@ -4,5 +4,7 @@
   "redirects": [
     { "source": "/[^/.]{1,8}", "destination": "/", "permanent": false }
   ],
-  "rewrites": [{ "source": "/(.*)", "destination": "/src/index.ts" }]
+  "rewrites": [
+    { "source": "/((?!_vercel/).*)", "destination": "/src/index.ts" }
+  ]
 }

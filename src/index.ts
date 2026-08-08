@@ -4,14 +4,15 @@ import { URL } from 'url';
 import path from 'path';
 import { minify_sync as minify } from 'terser';
 import CleanCSS from 'clean-css';
+import { config } from './config.js';
+import { seoStore } from './seo.js';
 
-const {
-  PAGE_URL = 'https://notion.notion.site/Notion-Official-83715d7703ee4b8699b5e659a4712dd8',
-  GA_MEASUREMENT_ID,
-} = process.env;
+const PAGE_URL = config.pageUrl;
+const GA_MEASUREMENT_ID = config.analytics.googleAnalyticsId;
 
 const GOOGLE_ANALYTICS_SOURCES =
   'https://www.googletagmanager.com https://www.google-analytics.com';
+const VERCEL_ANALYTICS_SOURCES = 'https://va.vercel-scripts.com';
 const CUSTOM_STYLE = `
   .notion-topbar > div > div:nth-last-child(1), .notion-topbar > div > div:nth-last-child(2) {
     display:none !important;
@@ -103,6 +104,98 @@ const ga = GA_MEASUREMENT_ID
 </script>`
   : '';
 
+const vercelAnalytics = config.analytics.vercelAnalytics
+  ? `<!-- Vercel Analytics -->
+<script>window.va=window.va||function(){(window.vaq=window.vaq||[]).push(arguments);};</script>
+<script defer src="/_vercel/insights/script.js"></script>`
+  : '';
+
+const vercelSpeedInsights = config.analytics.vercelSpeedInsights
+  ? `<!-- Vercel Speed Insights -->
+<script defer src="/_vercel/speed-insights/script.js"></script>`
+  : '';
+
+// 所有注入到 </body> 之前的分析脚本
+const analyticsMarkup = `${ga}${vercelAnalytics}${vercelSpeedInsights}`;
+
+/** HTML 属性值转义,防止破坏标签结构 */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/** 站点验证 meta 标签(全站统一) */
+function getVerificationMarkup(): string {
+  const tags: string[] = [];
+  if (config.verification.google) {
+    tags.push(
+      `<meta name="google-site-verification" content="${escapeHtml(
+        config.verification.google,
+      )}">`,
+    );
+  }
+  if (config.verification.bing) {
+    tags.push(
+      `<meta name="msvalidate.01" content="${escapeHtml(
+        config.verification.bing,
+      )}">`,
+    );
+  }
+  return tags.join('');
+}
+
+/** 根据请求路径取出用于查询 SEO 的第一段 key */
+function getSeoKey(requestUrl: string): string {
+  const [, firstSegment = ''] = requestUrl.split('?')[0].split('/');
+  return decodeURIComponent(firstSegment);
+}
+
+/**
+ * 生成当前请求对应的 SEO <title> 与 meta 标签。
+ * - 优先使用数据库条目的 Description / 标题
+ * - 根页面回退到设置文件中的默认值
+ */
+function getSeoMarkup(requestUrl: string): {
+  title: string;
+  description: string;
+  markup: string;
+} {
+  const key = getSeoKey(requestUrl);
+  const meta = key ? seoStore.getMeta(key) : undefined;
+
+  const title = meta?.title || config.seo.defaultTitle;
+  const description = meta?.description || config.seo.defaultDescription;
+
+  const tags: string[] = [];
+  if (description) {
+    tags.push(`<meta name="description" content="${escapeHtml(description)}">`);
+    tags.push(
+      `<meta property="og:description" content="${escapeHtml(description)}">`,
+    );
+    tags.push(
+      `<meta name="twitter:description" content="${escapeHtml(description)}">`,
+    );
+  }
+  if (title) {
+    tags.push(`<meta property="og:title" content="${escapeHtml(title)}">`);
+    tags.push(`<meta name="twitter:title" content="${escapeHtml(title)}">`);
+  }
+  if (config.seo.siteName) {
+    tags.push(
+      `<meta property="og:site_name" content="${escapeHtml(
+        config.seo.siteName,
+      )}">`,
+    );
+  }
+  tags.push('<meta property="og:type" content="website">');
+  tags.push('<meta name="twitter:card" content="summary_large_image">');
+
+  return { title, description, markup: tags.join('') };
+}
+
 const customScript = () => {
   const replacedUrl = (url: string) => {
     const [, domain] = /^https?:\/\/([^\\/]*)/.exec(url) || ['', ''];
@@ -153,6 +246,14 @@ function getCustomStyle() {
 const injectedHeadMarkup = `<script>${getLocationProxyScript()}</script>${getCustomScript()}${getCustomStyle()}`;
 
 function getProxyPath(url: string) {
+  // 自定义 slug 路由:把 /my-slug 映射到对应 Notion 页面 ID
+  const [, firstSegment = ''] = url.split('?')[0].split('/');
+  if (firstSegment) {
+    const targetPageId = seoStore.resolvePageId(decodeURIComponent(firstSegment));
+    if (targetPageId) {
+      return `/${targetPageId}`;
+    }
+  }
   return url.replace(/\/(\?|$)/, `/${pageId}$1`);
 }
 
@@ -168,7 +269,7 @@ function rewriteCookieDomains(cookies: string[], hostname: string) {
 function addAnalyticsSourcesToCsp(csp: string) {
   return csp.replace(
     /(?=(script-src|connect-src) )[^;]*/g,
-    `$& ${GOOGLE_ANALYTICS_SOURCES}`,
+    `$& ${GOOGLE_ANALYTICS_SOURCES} ${VERCEL_ANALYTICS_SOURCES}`,
   );
 }
 
@@ -190,10 +291,30 @@ function rewriteRuntimeAsset(data: string) {
   return data.replace(LOCATION_HREF_PATTERN, 'window.ncd.href()');
 }
 
-function rewriteHtml(data: string) {
-  return data
-    .replace('</head>', `${injectedHeadMarkup}</head>`)
-    .replace('</body>', `${ga}</body>`);
+function rewriteHtml(data: string, requestUrl: string) {
+  const { title, description, markup: seoMarkup } = getSeoMarkup(requestUrl);
+  let result = data;
+
+  // 替换原有 <title>(有自定义标题时)
+  if (title) {
+    result = /<title>[\s\S]*?<\/title>/i.test(result)
+      ? result.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(title)}</title>`)
+      : result.replace('</head>', `<title>${escapeHtml(title)}</title></head>`);
+  }
+
+  // 移除 Notion 原有的 description,避免重复
+  if (description) {
+    result = result.replace(
+      /<meta[^>]*name=["']description["'][^>]*>/gi,
+      '',
+    );
+  }
+
+  const headInjection = `${getVerificationMarkup()}${seoMarkup}${injectedHeadMarkup}`;
+
+  return result
+    .replace('</head>', `${headInjection}</head>`)
+    .replace('</body>', `${analyticsMarkup}</body>`);
 }
 
 function rewriteSharedResponseContent(data: string) {
@@ -208,7 +329,7 @@ function rewriteSharedResponseContent(data: string) {
 function decorateHtmlOrAssetResponse(data: string, requestUrl: string) {
   const rewritten = ASSET_REQUEST_PATTERN.test(requestUrl)
     ? rewriteRuntimeAsset(data)
-    : rewriteHtml(data);
+    : rewriteHtml(data, requestUrl);
 
   return rewriteSharedResponseContent(rewritten);
 }
@@ -221,6 +342,9 @@ interface CacheEntry {
 const assetCache = new Map<string, CacheEntry>();
 
 const app = express();
+
+// 启动 SEO / Slug 内存缓存,并按 config.refreshIntervalMs 定时刷新
+seoStore.start();
 
 app.use((req, res, next) => {
   const cached = assetCache.get(req.url);

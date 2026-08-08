@@ -60,6 +60,29 @@ GA_MEASUREMENT_ID=G-XXXXXXXXXX \
 yarn deploy:prod
 ```
 
+## SEO, Slug & Analytics Settings
+
+All tunable options live in a single file: [`src/config.ts`](src/config.ts).
+
+Set the Notion integration token as an environment variable (it is a secret):
+
+```
+NOTION_TOKEN=secret_xxx
+```
+
+Then edit `src/config.ts`:
+
+- `notion.databaseIds`: the ID of every database inside your page.
+- `notion.propertyNames`: the property names used for `title`, `description`, and `slug`.
+- `seo`: default title / description / site name for the root page.
+- `verification.google` / `verification.bing`: site verification codes for Google Search Console and Bing Webmaster.
+- `analytics`: Google Analytics ID plus toggles for Vercel Analytics and Speed Insights.
+- `refreshIntervalMs`: how often the SEO / slug cache is rebuilt from Notion (default `1 hour`).
+
+For each database record: if a `Description` property exists it becomes the SEO description; if a `Slug` property exists it becomes the URL slug, otherwise the original page string is used. The cache refreshes automatically on the configured interval — no redeploy needed.
+
+> Note: `vercel.json` contains a redirect (`/[^/.]{1,8}` → `/`) that sends short paths to the root. Custom slugs shorter than 9 characters will be caught by it — remove that redirect entry if you need short slugs like `/faq`.
+
 ## Using Environment Variables on the Vercel Dashboard
 
 You can use environment variables on the Vercel Dashboard. In this case, you can simply run
