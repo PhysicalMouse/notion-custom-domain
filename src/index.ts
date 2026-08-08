@@ -478,6 +478,11 @@ app.use(
     proxyReqOptDecorator: (proxyReqOpts) => {
       if (proxyReqOpts.headers) {
         delete proxyReqOpts.headers['accept-encoding'];
+        // 不把 Googlebot/Bingbot UA 转发给 Notion 上游，避免 Cloudflare
+        // 返回 403 挑战页；访客侧仍收到完整 SEO HTML。
+        proxyReqOpts.headers['user-agent'] =
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
       }
       return proxyReqOpts;
     },

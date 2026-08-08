@@ -114,9 +114,15 @@ class SeoStore {
       : undefined;
   }
 
-  /** 页面 ID -> 自定义 slug，供浏览器端改写 Notion 内部导航 URL。 */
+  /**
+   * 页面 ID -> 浏览器显示路径。
+   * 有 Slug 时显示 Slug；普通 child_page 没有 Slug 时显示纯页面 ID。
+   * SEO canonical 仍由 canonicalSlug 单独控制，不会误收录纯 ID。
+   */
   getPageSlugMap(): Record<string, string> {
     const result: Record<string, string> = {};
+    for (const meta of this.byPageId.values())
+      result[meta.pageId] = meta.pageId;
     for (const [slug, pageId] of this.slugToPageId) result[pageId] = slug;
     return result;
   }
@@ -156,12 +162,14 @@ class SeoStore {
    *   - 嵌套很深或位于分栏 / 折叠块内的数据库
    * 这些正是「有些页面仍保留 Blender- 前缀、未命中 Slug」的原因。
    */
-  private async searchDatabaseIds(): Promise<string[]> {
-    const found = new Set<string>();
+  private async searchNotionObjects(
+    object: 'database' | 'page',
+  ): Promise<any[]> {
+    const found: any[] = [];
     let cursor: string | undefined;
     do {
       const body: Record<string, unknown> = {
-        filter: { property: 'object', value: 'database' },
+        filter: { property: 'object', value: object },
         page_size: 100,
       };
       if (cursor) body.start_cursor = cursor;
@@ -169,14 +177,25 @@ class SeoStore {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      for (const item of json.results ?? []) {
-        if (item.object === 'database' && item.id) {
-          found.add(stripDashes(item.id));
-        }
-      }
+      found.push(
+        ...(json.results ?? []).filter(
+          (item: any) => item.object === object && item.id,
+        ),
+      );
       cursor = json.has_more ? json.next_cursor : undefined;
     } while (cursor);
-    return [...found];
+    return found;
+  }
+
+  private async searchDatabaseIds(): Promise<string[]> {
+    return (await this.searchNotionObjects('database')).map((database) =>
+      stripDashes(database.id),
+    );
+  }
+
+  /** 搜索 Integration 可见的普通子页面，包括 child_page。 */
+  private async searchPages(): Promise<any[]> {
+    return this.searchNotionObjects('page');
   }
 
   /**
@@ -232,7 +251,10 @@ class SeoStore {
     const pageId = stripDashes(record.id ?? '');
     if (!pageId) return null;
 
-    const titleText = readPlainText(props[title]);
+    const titleProperty =
+      props[title] ??
+      Object.values(props).find((property: any) => property?.type === 'title');
+    const titleText = readPlainText(titleProperty);
     const descriptionText = readPlainText(props[description]);
     const slugText = readPlainText(props[slug]);
 
@@ -285,9 +307,7 @@ class SeoStore {
     const databaseIds = [...ids];
 
     if (databaseIds.length === 0) {
-      console.info('[NCD][SEO] 未发现任何数据库');
-      this.lastRefreshedAt = Date.now();
-      return;
+      console.info('[NCD][SEO] 未发现数据库，将继续检测普通子页面');
     }
 
     const nextByPageId = new Map<string, PageMeta>();
@@ -295,28 +315,36 @@ class SeoStore {
     const nextSlugToPageId = new Map<string, string>();
     const { slug: slugPropName } = config.notion.propertyNames;
 
+    const addRecord = (record: any): void => {
+      const meta = this.toPageMeta(record);
+      if (!meta) return;
+
+      const hasCustomSlug = Boolean(
+        readPlainText(record.properties?.[slugPropName]),
+      );
+      nextByPageId.set(meta.pageId, meta);
+      nextBySlug.set(meta.slug, meta);
+
+      if (hasCustomSlug && meta.slug !== meta.pageId) {
+        nextSlugToPageId.set(meta.slug, meta.pageId);
+      }
+    };
+
     for (const databaseId of databaseIds) {
       try {
-        const records = await this.queryDatabase(databaseId);
-        for (const record of records) {
-          const meta = this.toPageMeta(record);
-          if (!meta) continue;
-
-          const hasCustomSlug = Boolean(
-            readPlainText(record.properties?.[slugPropName]),
-          );
-
-          nextByPageId.set(meta.pageId, meta);
-          nextBySlug.set(meta.slug, meta);
-
-          // 仅当存���自定义 slug 且与 pageId 不同时,才建立美观 URL 路由
-          if (hasCustomSlug && meta.slug !== meta.pageId) {
-            nextSlugToPageId.set(meta.slug, meta.pageId);
-          }
+        for (const record of await this.queryDatabase(databaseId)) {
+          addRecord(record);
         }
       } catch (error) {
         console.error('[NCD][SEO]', (error as Error).message);
       }
+    }
+
+    // 数据库查询不会返回普通 child_page；Search API 补齐这些页面。
+    try {
+      for (const page of await this.searchPages()) addRecord(page);
+    } catch (error) {
+      console.error('[NCD][SEO] 普通子页面检测失败', (error as Error).message);
     }
 
     this.byPageId = nextByPageId;
