@@ -143,23 +143,6 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-// 搜索引擎(必应/谷歌)推荐的描述长度上限。
-// 注意:标题保留 Notion 原始内容,不做裁剪(按需求保留完整标题)。
-const DESCRIPTION_MAX = 160;
-
-/**
- * 把文本裁剪到指定长度上限,尽量在词边界断开并追加省略号。
- * 已在长度内则原样返回。
- */
-function truncateText(text: string, max: number): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= max) return trimmed;
-  const sliced = trimmed.slice(0, max - 1);
-  const lastSpace = sliced.lastIndexOf(' ');
-  const base = lastSpace > max * 0.6 ? sliced.slice(0, lastSpace) : sliced;
-  return `${base.trimEnd()}…`;
-}
-
 /** 站点验证 meta 标签(全站统一) */
 function getVerificationMarkup(): string {
   const tags: string[] = [];
@@ -205,15 +188,10 @@ function getSeoMarkup(
 
   const title = (meta?.title || config.seo.defaultTitle).trim();
 
-  // 描述缺失时回退到标题,保证有内容,再统一裁剪到推荐长度上限。
-  const rawDescription = (
-    meta?.description ||
-    config.seo.defaultDescription ||
-    title
+  // 描述直接使用 Notion 原始内容,不做兜底回退、不裁剪(按需求自行控制)。
+  const description = (
+    meta?.description || config.seo.defaultDescription
   ).trim();
-  const description = rawDescription
-    ? truncateText(rawDescription, DESCRIPTION_MAX)
-    : '';
 
   const tags: string[] = [];
 
