@@ -143,8 +143,8 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-// 搜索引擎(必应/谷歌)推荐的标题与描述长度区间。
-const TITLE_MAX = 60;
+// 搜索引擎(必应/谷歌)推荐的描述长度上限。
+// 注意:标题保留 Notion 原始内容,不做裁剪(按需求保留完整标题)。
 const DESCRIPTION_MAX = 160;
 
 /**
@@ -195,10 +195,8 @@ function getSeoMarkup(
   requestUrl: string,
   host?: string,
 ): {
-  /** 完整标题,用于注入页面的 <h1> */
+  /** 完整标题(Notion 原始内容,不裁剪),用于 <title>、og:title 及注入的 <h1> */
   title: string;
-  /** 裁剪到搜索引擎推荐长度的标题,用于 <title> 与 og:title */
-  metaTitle: string;
   description: string;
   markup: string;
 } {
@@ -206,7 +204,6 @@ function getSeoMarkup(
   const meta = key ? seoStore.getMeta(key) : undefined;
 
   const title = (meta?.title || config.seo.defaultTitle).trim();
-  const metaTitle = title ? truncateText(title, TITLE_MAX) : '';
 
   // 描述缺失时回退到标题,保证有内容,再统一裁剪到推荐长度上限。
   const rawDescription = (
@@ -246,9 +243,9 @@ function getSeoMarkup(
       `<meta name="twitter:description" content="${escapeHtml(description)}">`,
     );
   }
-  if (metaTitle) {
-    tags.push(`<meta property="og:title" content="${escapeHtml(metaTitle)}">`);
-    tags.push(`<meta name="twitter:title" content="${escapeHtml(metaTitle)}">`);
+  if (title) {
+    tags.push(`<meta property="og:title" content="${escapeHtml(title)}">`);
+    tags.push(`<meta name="twitter:title" content="${escapeHtml(title)}">`);
   }
   if (config.seo.siteName) {
     tags.push(
@@ -260,7 +257,7 @@ function getSeoMarkup(
   tags.push('<meta property="og:type" content="website">');
   tags.push('<meta name="twitter:card" content="summary_large_image">');
 
-  return { title, metaTitle, description, markup: tags.join('') };
+  return { title, description, markup: tags.join('') };
 }
 
 const customScript = () => {
@@ -365,23 +362,19 @@ function rewriteRuntimeAsset(data: string) {
 function rewriteHtml(data: string, requestUrl: string, host?: string) {
   const {
     title,
-    metaTitle,
     description,
     markup: seoMarkup,
   } = getSeoMarkup(requestUrl, host);
   let result = data;
 
-  // 替换原有 <title>(有自定义标题时),使用裁剪到推荐长度的标题
-  if (metaTitle) {
+  // 替换原有 <title>(有自定义标题时),使用 Notion 原始完整标题,不做裁剪
+  if (title) {
     result = /<title>[\s\S]*?<\/title>/i.test(result)
       ? result.replace(
           /<title>[\s\S]*?<\/title>/i,
-          `<title>${escapeHtml(metaTitle)}</title>`,
+          `<title>${escapeHtml(title)}</title>`,
         )
-      : result.replace(
-          '</head>',
-          `<title>${escapeHtml(metaTitle)}</title></head>`,
-        );
+      : result.replace('</head>', `<title>${escapeHtml(title)}</title></head>`);
   }
 
   // 为 <html> 补充 lang 属性(缺失时),供搜索引擎识别页面语言。
@@ -494,7 +487,7 @@ app.get('/sitemap.xml', async (req, res) => {
 
 // 将带前缀 / 原始 ID 的页面 URL 301 重定向到简洁 slug。
 // 仅处理浏览器 / 爬虫的顶层文档导航(Accept: text/html),
-// 不影响 Notion 前端的资源与 API 请求。
+// 不影响 Notion 前��的资源与 API 请求。
 app.use(async (req, res, next) => {
   const accept = String(req.headers['accept'] ?? '');
   if (req.method !== 'GET' || !accept.includes('text/html')) return next();
