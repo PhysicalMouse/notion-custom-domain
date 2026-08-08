@@ -100,10 +100,10 @@ export const config: AppConfig = {
   },
 
   seo: {
-    defaultTitle: '',
-    defaultDescription: '',
-    siteName: '',
-    language: 'zh-CN',
+    defaultTitle: "PhysicalMouse's Blog",
+    defaultDescription: "PhysicalMouse's personal blog covering Blender 3D art, sculpting, creative practice and study notes. 物理鼠鼠的个人博客，内容涵盖 Blender 3D 艺术、雕刻、创作实践以及学习笔记。",
+    siteName: "PhysicalMouse's Blog",
+    language: 'en-US',
   },
 
   verification: {
@@ -114,10 +114,10 @@ export const config: AppConfig = {
   },
 
   analytics: {
-    googleAnalytics: false,
-    googleAnalyticsId: '',
+    googleAnalytics: true,
+    googleAnalyticsId: 'G-NX2G97BYGR',
     vercelAnalytics: true,
-    vercelSpeedInsights: false,
+    vercelSpeedInsights: true,
   },
 
   // 1 小时 = 60 * 60 * 1000 毫秒
